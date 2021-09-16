@@ -30,14 +30,36 @@ lapply(the_data, function(x){
 ## No strange values. Convert these to factor variables:
 the_data <- the_data %>% mutate(across(where(is.character), as.factor))
 
+chi <- lapply(the_data[, sapply(the_data, is.factor) & colnames(the_data) != "status"], 
+              function(x){
+                chisq.test(the_data[, names(the_data) == "status"], x)
+                })
+chi <- do.call(rbind, chi)[, c(1, 3)]
+chi <- as.data.frame(chi)
+chi$p.value <- as.numeric(chi$p.value)
+chi %>% arrange(p.value)
+chi <- chi %>% filter(p.value < 0.2)
+chosen_variables_categorical <- row.names(chi)
 
+ttest <- lapply(the_data[, sapply(the_data, is.numeric) & colnames(the_data) != "salary"],
+                function(x){
+                  t.test(x ~ the_data$status)
+                })
+ttest <- do.call(rbind, ttest)[, c(1, 3)]
+ttest <- as.data.frame(ttest)
+ttest$p.value <- as.numeric(ttest$p.value)
+ttest %>% arrange(p.value)
+ttest <- ttest %>% filter(p.value < 0.2)
+chosen_variables_numeric <- row.names(ttest)
 ## Modeling
 
 ## First remove the salary column
 the_data <- the_data[, names(the_data) != "salary"]
 
 ## need to pick the right variables to include
-the_data <- the_data[, names(the_data) %in% c("status", "workex","ssc_p","degree_p","hsc_p","specialisation","etest_p","mba_p")]
+the_data <- the_data[, names(the_data) %in% chosen_variables_categorical |
+                       names(the_data) %in% chosen_variables_numeric |
+                       names(the_data) == "status"]
 
 test_index <- createDataPartition(the_data$status, p = 0.5, 
                                   list = FALSE)
@@ -63,3 +85,11 @@ model_rf <- train(status ~ ., data = train_set,
 ggplot(model_rf, highlight = TRUE)
 predict_rf <- predict(model_rf, test_set, type = "raw")
 confusionMatrix(predict_rf, test_set$status)
+
+## ensemble
+ensemble <- data.frame(GLM = predict_glm, KNN = predict_knn, RF = predict_rf)
+ensemble$vote <- apply(ensemble, 1, function(x){
+  names(which.max(table(x)))
+})
+ensemble$vote <- factor(ensemble$vote, levels = levels(the_data$status))
+confusionMatrix(ensemble$vote, test_set$status)
